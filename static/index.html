@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>AES Visualization</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+            background-color: #f7f7f7;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 5px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .input-section {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .button-group {
+            text-align: center;
+            margin-top: 15px;
+        }
+        .visualization-section {
+            margin-top: 30px;
+        }
+        .state-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 5px;
+            margin-bottom: 20px;
+        }
+        .state-cell {
+            padding: 10px;
+            text-align: center;
+            background-color: #e9e9e9;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-family: monospace;
+            position: relative;
+        }
+        .state-cell.changed {
+            background-color: #ffeb3b;
+            transition: background-color 0.5s;
+        }
+        .step-info {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-left: 4px solid #4CAF50;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .step-selector {
+            display: flex;
+            justify-content: center;
+            margin-top: 15px;
+        }
+        .step-button {
+            background-color: #2196F3;
+            color: white;
+            padding: 8px 12px;
+            margin: 0 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .step-button.active {
+            background-color: #0b7dda;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AES Visualization</h1>
+        
+        <div class="input-section">
+            <div class="input-group">
+                <label for="text-input">Text to Encrypt:</label>
+                <input type="text" id="text-input" value="HelloWorld1234" placeholder="Enter text to encrypt">
+            </div>
+            
+            <div class="input-group">
+                <label for="key-input">Encryption Key:</label>
+                <input type="text" id="key-input" value="SecretKey12345" placeholder="Enter encryption key">
+            </div>
+            
+            <div class="button-group">
+                <button id="init-button">Initialize</button>
+                <button id="reset-button">Reset</button>
+            </div>
+        </div>
+        
+        <div class="visualization-section">
+            <h2>Current State</h2>
+            <p id="round-info">Round: 0 | Step: Initial</p>
+            
+            <div class="controls">
+                <button id="prev-step-button" disabled>Previous Step</button>
+                <button id="next-step-button" disabled>Next Step</button>
+            </div>
+            
+            <div class="step-selector">
+                <button class="step-button" data-step="SubBytes">SubBytes</button>
+                <button class="step-button" data-step="ShiftRows">ShiftRows</button>
+                <button class="step-button" data-step="MixColumns">MixColumns</button>
+                <button class="step-button" data-step="AddRoundKey">AddRoundKey</button>
+            </div>
+            
+            <h3>Data Matrix</h3>
+            <div id="data-grid" class="state-grid"></div>
+            
+            <h3>Key Matrix</h3>
+            <div id="key-grid" class="state-grid"></div>
+            
+            <div class="step-info">
+                <h3>Step Explanation</h3>
+                <div id="step-description">
+                    Initialize the AES state with your text and key to begin visualization.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="wasm_exec.js"></script>
+    <script>
+        let currentState = null;
+        let history = [];
+        let historyIndex = -1;
+        
+        const stepDescriptions = {
+            "Initial": "The text and key have been arranged in a 4×4 matrix format. Each cell contains a byte represented in hexadecimal.",
+            "SubBytes": "Each byte in the data matrix is replaced with another byte according to a substitution rule. This provides confusion in the cipher.",
+            "ShiftRows": "The rows of the state are shifted cyclically. Row 0 is not shifted, row 1 is shifted by 1, row 2 by 2, and row 3 by 3 bytes.",
+            "MixColumns": "Each column is transformed using a linear transformation. This step provides diffusion in the cipher.",
+            "AddRoundKey": "Each byte of the state is combined with a byte of the round key using the XOR operation."
+        };
+        
+        // Initialize WebAssembly
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then((result) => {
+            go.run(result.instance);
+            console.log("WebAssembly module loaded");
+            document.getElementById("init-button").disabled = false;
+        }).catch(err => {
+            console.error("Failed to load WebAssembly module:", err);
+        });
+        
+        // DOM elements
+        const textInput = document.getElementById("text-input");
+        const keyInput = document.getElementById("key-input");
+        const initButton = document.getElementById("init-button");
+        const resetButton = document.getElementById("reset-button");
+        const prevStepButton = document.getElementById("prev-step-button");
+        const nextStepButton = document.getElementById("next-step-button");
+        const dataGrid = document.getElementById("data-grid");
+        const keyGrid = document.getElementById("key-grid");
+        const roundInfo = document.getElementById("round-info");
+        const stepDescription = document.getElementById("step-description");
+        const stepButtons = document.querySelectorAll(".step-button");
+        
+        // Initialize AES state
+        initButton.addEventListener("click", () => {
+            const text = textInput.value || "HelloWorld1234";
+            const key = keyInput.value || "SecretKey12345";
+            
+            try {
+                currentState = initAESState(text, key);
+                
+                // Clear history and add initial state
+                history = [JSON.parse(JSON.stringify(currentState))];
+                historyIndex = 0;
+                
+                updateVisualization();
+                nextStepButton.disabled = false;
+                prevStepButton.disabled = true;
+                
+                // Enable step buttons
+                stepButtons.forEach(btn => btn.disabled = false);
+            } catch (error) {
+                console.error("Error initializing AES state:", error);
+                alert("Error initializing AES state. Check the console for details.");
+            }
+        });
+        
+        // Reset visualization
+        resetButton.addEventListener("click", () => {
+            currentState = null;
+            history = [];
+            historyIndex = -1;
+            updateVisualization(true);
+            nextStepButton.disabled = true;
+            prevStepButton.disabled = true;
+            stepDescription.textContent = "Initialize the AES state with your text and key to begin visualization.";
+        });
+        
+        // Previous step button
+        prevStepButton.addEventListener("click", () => {
+            if (historyIndex > 0) {
+                historyIndex--;
+                currentState = JSON.parse(JSON.stringify(history[historyIndex]));
+                updateVisualization();
+                nextStepButton.disabled = false;
+                if (historyIndex === 0) {
+                    prevStepButton.disabled = true;
+                }
+            }
+        });
+        
+        // Next step button
+        nextStepButton.addEventListener("click", () => {
+            if (historyIndex < history.length - 1) {
+                historyIndex++;
+                currentState = JSON.parse(JSON.stringify(history[historyIndex]));
+                updateVisualization();
+                prevStepButton.disabled = false;
+                if (historyIndex === history.length - 1) {
+                    nextStepButton.disabled = true;
+                }
+            }
+        });
+        
+        // Add event listeners for step buttons
+        stepButtons.forEach(button => {
+            button.addEventListener("click", () => {
+                if (!currentState) return;
+                
+                const step = button.getAttribute("data-step");
+                try {
+                    // Highlight active button
+                    stepButtons.forEach(btn => btn.classList.remove("active"));
+                    button.classList.add("active");
+                    
+                    // Perform the selected AES step
+                    const newState = performAESStep(
+                        currentState.data,
+                        currentState.key,
+                        currentState.step,
+                        currentState.round,
+                        step
+                    );
+                    
+                    // Increment round if we completed a full cycle
+                    if (step === "AddRoundKey") {
+                        newState.round++;
+                    }
+                    
+                    currentState = newState;
+                    
+                    // Add to history if we're at the end
+                    if (historyIndex === history.length - 1) {
+                        history.push(JSON.parse(JSON.stringify(currentState)));
+                        historyIndex = history.length - 1;
+                    } else {
+                        // Replace future history
+                        history = history.slice(0, historyIndex + 1);
+                        history.push(JSON.parse(JSON.stringify(currentState)));
+                        historyIndex = history.length - 1;
+                    }
+                    
+                    updateVisualization();
+                    prevStepButton.disabled = false;
+                } catch (error) {
+                    console.error(`Error performing ${step} step:`, error);
+                    alert(`Error performing ${step} step. Check the console for details.`);
+                }
+            });
+        });
+        
+        // Update the visualization based on the current state
+        function updateVisualization(reset = false) {
+            dataGrid.innerHTML = '';
+            keyGrid.innerHTML = '';
+            
+            if (reset || !currentState) {
+                roundInfo.textContent = "Round: 0 | Step: Initial";
+                stepButtons.forEach(btn => btn.disabled = true);
+                return;
+            }
+            
+            // Update round info
+            roundInfo.textContent = `Round: ${currentState.round} | Step: ${currentState.step}`;
+            
+            // Update step description
+            stepDescription.textContent = stepDescriptions[currentState.step] || 
+                "This step transforms the data according to the AES algorithm.";
+            
+            // Update data grid
+            for (let i = 0; i < 4; i++) {
+                for (let j = 0; j < 4; j++) {
+                    const cell = document.createElement("div");
+                    cell.className = "state-cell";
+                    const byteValue = currentState.data[i][j];
+                    cell.textContent = byteValue.toString(16).padStart(2, "0");
+                    dataGrid.appendChild(cell);
+                }
+            }
+            
+            // Update key grid
+            for (let i = 0; i < 4; i++) {
+                for (let j = 0; j < 4; j++) {
+                    const cell = document.createElement("div");
+                    cell.className = "state-cell";
+                    const byteValue = currentState.key[i][j];
+                    cell.textContent = byteValue.toString(16).padStart(2, "0");
+                    keyGrid.appendChild(cell);
+                }
+            }
+            
+            // Update step buttons
+            stepButtons.forEach(btn => {
+                btn.classList.remove("active");
+                if (btn.getAttribute("data-step") === currentState.step) {
+                    btn.classList.add("active");
+                }
+            });
+        }
+    </script>
+</body>
+</html>
